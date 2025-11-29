@@ -240,6 +240,78 @@ function parseLLMResponse(content: string): InterpretResult {
 }
 
 /**
+ * 取得運勢範圍的中文描述
+ */
+function getScopeDescription(fortune: FortuneData | null): {
+  scopeName: string;
+  scopeContext: string;
+  interpretationFocus: string;
+} {
+  if (!fortune || fortune.scope === 'natal') {
+    return {
+      scopeName: '本命（先天命格）',
+      scopeContext: '這是命主的先天命格分析，反映其一生的基本特質與傾向。',
+      interpretationFocus: `請解讀命主的**先天命格特質**：
+- 著重分析與生俱來的性格、天賦、潛能
+- 說明一生中較為穩定的人生主題與傾向
+- 描述命主的基本格局與人生方向`,
+    };
+  }
+
+  switch (fortune.scope) {
+    case 'decade':
+      const decadeRange = fortune.decadeRange
+        ? `${fortune.decadeRange.start}-${fortune.decadeRange.end}歲`
+        : '';
+      return {
+        scopeName: `大限運勢（${decadeRange}）`,
+        scopeContext: `這是命主 ${decadeRange} 這十年的大限運勢分析。大限代表人生階段性的重大變化。`,
+        interpretationFocus: `請解讀命主在**這十年大限期間**的運勢變化：
+- 著重分析這十年與先天命格的差異和變化
+- 說明這段期間的重要人生課題與機遇
+- 指出這十年中需要特別注意的事項
+- 與先天命格對比，說明哪些方面會有明顯轉變`,
+      };
+    case 'year':
+      return {
+        scopeName: `流年運勢（${fortune.year}年）`,
+        scopeContext: `這是命主 ${fortune.year} 年的流年運勢分析。流年代表該年度的運勢走向。`,
+        interpretationFocus: `請解讀命主在**${fortune.year}年**這一整年的運勢：
+- 著重分析這一年的整體運勢走向
+- 說明今年在各方面可能遇到的機會與挑戰
+- 指出需要把握的時機或應該謹慎的事項
+- 提供這一年的具體建議和注意事項`,
+      };
+    case 'month':
+      return {
+        scopeName: `流月運勢（${fortune.year}年${fortune.month}月）`,
+        scopeContext: `這是命主 ${fortune.year} 年 ${fortune.month} 月的流月運勢分析。流月代表該月份的運勢細節。`,
+        interpretationFocus: `請解讀命主在**${fortune.year}年${fortune.month}月**這個月的運勢：
+- 著重分析這個月的運勢特點
+- 說明本月在各方面的吉凶走向
+- 指出本月適合與不適合做的事情
+- 提供這個月份的具體行動建議`,
+      };
+    case 'day':
+      return {
+        scopeName: `流日運勢（${fortune.year}年${fortune.month}月${fortune.day}日）`,
+        scopeContext: `這是命主 ${fortune.year} 年 ${fortune.month} 月 ${fortune.day} 日的流日運勢分析。流日代表當天的運勢吉凶。`,
+        interpretationFocus: `請解讀命主在**${fortune.year}年${fortune.month}月${fortune.day}日**這一天的運勢：
+- 著重分析今日的運勢特點和能量
+- 說明今日各方面的吉凶宜忌
+- 指出今日最適合處理的事務類型
+- 提供今日具體的行動指南和注意事項`,
+      };
+    default:
+      return {
+        scopeName: '本命（先天命格）',
+        scopeContext: '這是命主的先天命格分析。',
+        interpretationFocus: '請解讀命主的先天命格特質。',
+      };
+  }
+}
+
+/**
  * 呼叫 LLM 進行命盤解釋（主要入口）
  */
 export async function callLLM(
@@ -265,7 +337,27 @@ export async function callLLM(
     weekday: 'long',
   });
 
-  const prompt = `請根據以下命盤 JSON 資料，為命主提供詳細的命理解讀。
+  // 取得運勢範圍描述
+  const scopeInfo = getScopeDescription(fortune);
+
+  // 根據運勢範圍調整解讀指引
+  const isNatal = !fortune || fortune.scope === 'natal';
+  const periodPrefix = isNatal ? '' : `在${scopeInfo.scopeName}期間，`;
+  const todaySection = isNatal || fortune?.scope === 'day'
+    ? `
+- **今日適合做的事**（todayTodo）：根據命盤與今日運勢，列出 3-5 件今天適合做的具體事項
+- **今日不適合的事**（todayAvoid）：根據命盤與今日運勢，列出 3-5 件今天應避免的事項`
+    : `
+- **本期適合做的事**（todayTodo）：根據${scopeInfo.scopeName}的運勢，列出 3-5 件這段期間適合做的事項
+- **本期應避免的事**（todayAvoid）：根據${scopeInfo.scopeName}的運勢，列出 3-5 件這段期間應避免的事項`;
+
+  const prompt = `請根據以下命盤 JSON 資料，為命主提供「${scopeInfo.scopeName}」的詳細命理解讀。
+
+## 解讀範圍說明
+**當前查詢：${scopeInfo.scopeName}**
+${scopeInfo.scopeContext}
+
+${scopeInfo.interpretationFocus}
 
 ## 命盤資料
 \`\`\`json
@@ -276,25 +368,27 @@ ${JSON.stringify(chartData, null, 2)}
 ${today}
 
 ## 解讀任務
-請針對十二宮提供解讀（每項 80-120 字）：
+請針對十二宮提供「${scopeInfo.scopeName}」的解讀（每項 80-120 字）：
 
-1. **命宮解讀**（life）：性格特質、人生觀、外在形象
-2. **兄弟宮解讀**（siblings）：兄弟姐妹關係、朋友交際、人際互動
-3. **夫妻宮解讀**（marriage）：感情婚姻、伴侶關係、擇偶傾向
-4. **子女宮解讀**（children）：子女緣份、與晚輩的互動、教養方式
-5. **財帛宮解讀**（wealth）：財運、理財方式、收入來源
-6. **疾厄宮解讀**（health）：健康狀況、需注意事項、養生建議
-7. **遷移宮解讀**（travel）：外出運勢、遠行發展、貴人運
-8. **交友宮解讀**（friends）：人際關係、朋友助力、部屬運
-9. **官祿宮解讀**（career）：職業發展、工作運勢、適合行業
-10. **田宅宮解讀**（property）：不動產運、居家環境、家族資產
-11. **福德宮解讀**（fortune）：精神生活、興趣嗜好、內心世界、晚年運勢
-12. **父母宮解讀**（parents）：與長輩、父母的關係、家庭背景影響
+1. **命宮解讀**（life）：${periodPrefix}性格表現、個人狀態、外在形象
+2. **兄弟宮解讀**（siblings）：${periodPrefix}兄弟姐妹關係、平輩互動
+3. **夫妻宮解讀**（marriage）：${periodPrefix}感情婚姻、伴侶關係
+4. **子女宮解讀**（children）：${periodPrefix}子女緣份、與晚輩的互動
+5. **財帛宮解讀**（wealth）：${periodPrefix}財運走向、收入變化
+6. **疾厄宮解讀**（health）：${periodPrefix}健康狀況、需注意事項
+7. **遷移宮解讀**（travel）：${periodPrefix}外出運勢、發展機會
+8. **交友宮解讀**（friends）：${periodPrefix}人際關係、貴人運
+9. **官祿宮解讀**（career）：${periodPrefix}職業發展、工作運勢
+10. **田宅宮解讀**（property）：${periodPrefix}居家環境、不動產運
+11. **福德宮解讀**（fortune）：${periodPrefix}精神狀態、內心世界
+12. **父母宮解讀**（parents）：${periodPrefix}與長輩關係、家庭互動
 
 另外提供：
-- **總結建議**（summary）：整體性格特質與人生建議（100-150字）
-- **今日適合做的事**（todayTodo）：根據命盤與今日運勢，列出 3-5 件今天適合做的具體事項
-- **今日不適合的事**（todayAvoid）：根據命盤與今日運勢，列出 3-5 件今天應避免的事項
+- **總結建議**（summary）：「${scopeInfo.scopeName}」的整體運勢概述與建議（100-150字）${todaySection}
+
+## 重要提醒
+- 請確保解讀內容是針對「${scopeInfo.scopeName}」，而非其他時期
+- ${isNatal ? '本命解讀應著重先天格局和一生傾向' : '運勢解讀應著重這段期間的變化和特點，與本命有所區別'}
 
 ## 輸出 JSON 格式
 {
@@ -371,13 +465,27 @@ function buildChartData(astrolabe: Astrolabe, fortune: FortuneData | null) {
     };
   }
 
-  // 運勢資料
+  // 運勢資料（包含完整資訊）
   const fortuneData = fortune
     ? {
         scope: fortune.scope,
+        scopeDescription: getScopeLabel(fortune.scope),
+        decadeRange: fortune.decadeRange,
         year: fortune.year,
         month: fortune.month,
         day: fortune.day,
+        overallScore: fortune.overallScore,
+        summary: fortune.summary,
+        // 各宮位運勢摘要
+        palaceForecasts: {
+          parents: fortune.parents,
+          children: fortune.children,
+          marriage: fortune.marriage,
+          career: fortune.career,
+          wealth: fortune.wealth,
+          health: fortune.health,
+        },
+        keyPeriods: fortune.keyPeriods,
       }
     : null;
 
@@ -390,6 +498,20 @@ function buildChartData(astrolabe: Astrolabe, fortune: FortuneData | null) {
     soulStar: originalData.soul?.majorStars?.[0]?.name,
     bodyStar: originalData.body?.majorStars?.[0]?.name,
   };
+}
+
+/**
+ * 取得運勢範圍的標籤
+ */
+function getScopeLabel(scope: string): string {
+  const labels: Record<string, string> = {
+    natal: '本命（先天命格）',
+    decade: '大限（十年運）',
+    year: '流年（年運）',
+    month: '流月（月運）',
+    day: '流日（日運）',
+  };
+  return labels[scope] || '本命';
 }
 
 /**
