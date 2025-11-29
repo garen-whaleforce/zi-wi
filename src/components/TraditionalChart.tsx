@@ -90,13 +90,17 @@ const PalaceCell = memo(function PalaceCell({
   const palaceDescription = getPalaceDescription(palaceName);
   const colorClass = PALACE_COLORS[palaceName] || 'from-white/10 to-white/5 border-white/20';
 
+  // 手機版只顯示前2個輔星，桌面版顯示3個
+  const maxMinorStars = typeof window !== 'undefined' && window.innerWidth < 640 ? 2 : 3;
+
   return (
     <button
       onClick={onClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={`
-        relative p-2 sm:p-3 rounded-xl text-left
+        relative p-1.5 sm:p-3 rounded-lg sm:rounded-xl text-left
+        overflow-hidden
         bg-gradient-to-br ${colorClass}
         border backdrop-blur-sm
         transition-all duration-300 ease-out
@@ -110,12 +114,12 @@ const PalaceCell = memo(function PalaceCell({
     >
       {/* 宮位名稱 */}
       <Tooltip content={palaceDescription || ''} position="top">
-        <div className="flex items-center gap-1 mb-1">
-          <span className="text-xs sm:text-sm font-bold text-gold-400">
+        <div className="flex items-center gap-0.5 sm:gap-1 mb-0.5 sm:mb-1">
+          <span className="text-[10px] sm:text-sm font-bold text-gold-400 truncate">
             {palaceName}宮
           </span>
           {palace && (
-            <span className="text-xs text-white/40">
+            <span className="text-[8px] sm:text-xs text-white/40 hidden xs:inline">
               {palace.stem}{palace.branch}
             </span>
           )}
@@ -124,25 +128,25 @@ const PalaceCell = memo(function PalaceCell({
 
       {/* 星曜列表 */}
       {palace && (
-        <div className="space-y-0.5">
+        <div className="space-y-0 sm:space-y-0.5 overflow-hidden">
           {/* 主星 */}
-          {palace.mainStars.map((star) => {
+          {palace.mainStars.slice(0, 2).map((star) => {
             const description = getStarDescription(star.name);
             return (
               <Tooltip key={star.name} content={description || ''} position="top">
-                <div className={`text-xs sm:text-sm font-semibold truncate cursor-help ${getStarColorClass(star.name)}`}>
+                <div className={`text-[10px] sm:text-sm font-semibold truncate cursor-help ${getStarColorClass(star.name)}`}>
                   {star.name}
                 </div>
               </Tooltip>
             );
           })}
 
-          {/* 輔星（僅顯示前幾個） */}
-          {palace.minorStars.slice(0, 3).map((star) => {
+          {/* 輔星（手機版顯示較少） */}
+          {palace.minorStars.slice(0, maxMinorStars).map((star) => {
             const description = getStarDescription(star.name);
             return (
               <Tooltip key={star.name} content={description || ''} position="top">
-                <div className={`text-xs truncate cursor-help ${getStarColorClass(star.name)} opacity-80`}>
+                <div className={`text-[9px] sm:text-xs truncate cursor-help ${getStarColorClass(star.name)} opacity-80`}>
                   {star.name}
                 </div>
               </Tooltip>
@@ -150,9 +154,9 @@ const PalaceCell = memo(function PalaceCell({
           })}
 
           {/* 更多指示 */}
-          {palace.minorStars.length > 3 && (
-            <div className="text-xs text-white/30">
-              +{palace.minorStars.length - 3}
+          {(palace.mainStars.length > 2 || palace.minorStars.length > maxMinorStars) && (
+            <div className="text-[8px] sm:text-xs text-white/30">
+              +{Math.max(0, palace.mainStars.length - 2) + Math.max(0, palace.minorStars.length - maxMinorStars)}
             </div>
           )}
         </div>
@@ -171,18 +175,19 @@ const CenterInfo = memo(function CenterInfo({ astrolabe }: { astrolabe: Astrolab
   return (
     <div
       className="
-        rounded-xl p-4
+        rounded-lg sm:rounded-xl p-2 sm:p-4
         bg-gradient-to-br from-primary-900/80 to-primary-950/80
         border-2 border-gold-500/30
         backdrop-blur-md
         flex flex-col items-center justify-center
         text-center
         shadow-inner-glow
+        overflow-hidden
       "
       style={{ gridArea: 'center' }}
     >
-      {/* 裝飾圖案 */}
-      <div className="relative mb-3">
+      {/* 裝飾圖案 - 手機版隱藏 */}
+      <div className="relative mb-1 sm:mb-3 hidden sm:block">
         <div className="w-16 h-16 rounded-full border-2 border-gold-400/50 flex items-center justify-center">
           <div className="w-12 h-12 rounded-full border border-gold-400/30 flex items-center justify-center">
             <span className="text-2xl">☯</span>
@@ -195,21 +200,23 @@ const CenterInfo = memo(function CenterInfo({ astrolabe }: { astrolabe: Astrolab
           <div className="absolute right-0 top-1/2 w-1 h-1 rounded-full bg-gold-400 -translate-y-1/2" />
         </div>
       </div>
+      {/* 手機版簡化圖案 */}
+      <div className="sm:hidden text-xl mb-1">☯</div>
 
       {/* 基本資訊 */}
-      <div className="space-y-1">
+      <div className="space-y-0.5 sm:space-y-1">
         {astrolabe.name && (
-          <div className="text-lg font-serif font-bold text-gold-400">
+          <div className="text-sm sm:text-lg font-serif font-bold text-gold-400 truncate max-w-full">
             {astrolabe.name}
           </div>
         )}
-        <div className="text-sm text-white/70">
+        <div className="text-xs sm:text-sm text-white/70">
           {astrolabe.gender === '男' ? '乾造' : '坤造'}
         </div>
-        <div className="text-xs text-white/50">
+        <div className="text-[10px] sm:text-xs text-white/50">
           {astrolabe.birthDate}
         </div>
-        <div className="text-xs text-white/50">
+        <div className="text-[10px] sm:text-xs text-white/50 hidden sm:block">
           {astrolabe.birthTime}
         </div>
       </div>
@@ -245,8 +252,7 @@ export default function TraditionalChart({
             "p7  p8  p9  p10"
           `,
           gridTemplateColumns: 'repeat(4, 1fr)',
-          gridTemplateRows: 'repeat(4, minmax(80px, 1fr))',
-          aspectRatio: '1',
+          gridTemplateRows: 'repeat(4, minmax(60px, 1fr))',
         }}
       >
         {/* 十二宮位 */}
