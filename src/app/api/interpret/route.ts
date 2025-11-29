@@ -1,7 +1,7 @@
 /**
  * POST /api/interpret
  * 根據命盤 + 運勢，使用 LLM 生成解釋
- * 含速率限制保護（每分鐘 10 次）和雙層快取（記憶體 + Supabase）
+ * 含速率限制保護（每分鐘 10 次）和雙層快取（記憶體 + Redis）
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,28 +17,23 @@ import {
   generateCacheKey,
   startCacheCleanup,
 } from '@/lib/cache';
-// Supabase 快取已停用
-// import {
-//   getCachedInterpretation,
-//   saveInterpretation,
-//   isSupabaseConfigured,
-//   initializeTables,
-// } from '@/lib/supabase';
+import {
+  isRedisConfigured,
+  getFromRedis,
+  setToRedis,
+  buildRedisInterpretKey,
+} from '@/lib/redis';
 import type { Astrolabe, FortuneData, InterpretResult } from '@/lib/types';
 
 // 啟動快取清理定時器
 startCacheCleanup();
 
-// Supabase 快取已停用
-// if (isSupabaseConfigured) {
-//   initializeTables().then((result) => {
-//     if (result.success) {
-//       console.log('Supabase 資料表已就緒');
-//     } else {
-//       console.warn('Supabase 初始化提示:', result.error);
-//     }
-//   });
-// }
+// 顯示 Redis 設定狀態
+if (isRedisConfigured) {
+  console.log('Redis 快取已啟用');
+} else {
+  console.log('Redis 未設定，僅使用記憶體快取');
+}
 
 /**
  * 建立快取鍵（用於記憶體快取）
@@ -92,11 +87,20 @@ export async function POST(request: NextRequest) {
 
     const chartId = (astrolabe as Astrolabe).chartId;
     const fortuneScope = getFortuneScope(fortune as FortuneData | null);
-    // fortuneParams 不再需要（Supabase 已停用）
+    const fortuneData = fortune as FortuneData | null;
     const memoryCacheKey = buildInterpretCacheKey(
       astrolabe as Astrolabe,
-      fortune as FortuneData | null
+      fortuneData
     );
+
+    // 建立 Redis 快取鍵
+    const fortuneParams = {
+      decadeRange: fortuneData?.decadeRange,
+      year: fortuneData?.year,
+      month: fortuneData?.month,
+      day: fortuneData?.day,
+    };
+    const redisCacheKey = buildRedisInterpretKey(chartId, fortuneScope, fortuneParams);
 
     // 詳細日誌記錄
     console.log('=== Interpret API 請求 ===');
@@ -104,9 +108,10 @@ export async function POST(request: NextRequest) {
     console.log('fortune scope:', fortune?.scope || 'null (natal)');
     console.log('fortune data:', JSON.stringify(fortune, null, 2));
     console.log('memoryCacheKey:', memoryCacheKey);
+    console.log('redisCacheKey:', redisCacheKey);
 
     let result: InterpretResult | null = null;
-    let cacheSource: 'memory' | 'supabase' | 'llm' = 'llm';
+    let cacheSource: 'memory' | 'redis' | 'llm' = 'llm';
 
     // 第一層：檢查記憶體快取
     const memoryCached = interpretCache.get(memoryCacheKey);
@@ -116,20 +121,39 @@ export async function POST(request: NextRequest) {
       cacheSource = 'memory';
     }
 
-    // Supabase 快取已停用，直接使用記憶體快取或 LLM
+    // 第二層：檢查 Redis 快取
+    if (!result && isRedisConfigured) {
+      const redisCached = await getFromRedis<InterpretResult>(redisCacheKey);
+      if (redisCached) {
+        console.log(`Redis 快取命中: ${redisCacheKey}`);
+        result = redisCached;
+        cacheSource = 'redis';
+        // 回填記憶體快取（5 分鐘）
+        interpretCache.set(memoryCacheKey, result, 5 * 60 * 1000);
+      }
+    }
 
-    // 第二層：呼叫 LLM 生成
+    // 第三層：呼叫 LLM 生成
     if (!result) {
       console.log(`快取未命中，呼叫 LLM: chartId=${chartId}, scope=${fortuneScope}`);
       result = await callLLM(
         astrolabe as Astrolabe,
-        fortune as FortuneData | null,
+        fortuneData,
         topics || []
       );
       cacheSource = 'llm';
 
-      // 儲存到記憶體快取
+      // 儲存到記憶體快取（5 分鐘）
       interpretCache.set(memoryCacheKey, result, 5 * 60 * 1000);
+
+      // 儲存到 Redis 快取（7 天）
+      if (isRedisConfigured) {
+        setToRedis(redisCacheKey, result).then((success) => {
+          if (success) {
+            console.log(`已儲存到 Redis: ${redisCacheKey}`);
+          }
+        });
+      }
     }
 
     // 在回應中加入速率限制和快取資訊
