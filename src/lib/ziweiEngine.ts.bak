@@ -1,0 +1,74 @@
+import iztro from 'iztro';
+import { BirthData, Astrolabe, Palace, Star } from './types';
+
+export async function generateAstrolabe(birthData: BirthData): Promise<Astrolabe> {
+  try {
+    const [year, month, day] = birthData.birthDate.split('-').map(Number);
+    const gender = birthData.gender === '男' || birthData.gender === 'M' ? '男' : '女';
+    const isLeapMonth = birthData.leapMonthMode === 'leap';
+
+    // iztro expects date as string format 'YYYY-MM-DD'
+    const solarDateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+    // Call iztro排盤 API
+    const iztroResult = iztro.astro.bySolar(
+      solarDateStr,
+      birthData.birthTimeIndex,
+      gender,
+      isLeapMonth // fixLeap parameter
+    );
+
+    // Transform iztro palaces to our Palace interface
+    const palaces: Palace[] = iztroResult.palaces.map((ipalace: any) => ({
+      index: ipalace.index,
+      name: ipalace.name,
+      heavenlyStem: ipalace.heavenlyStem,
+      earthlyBranch: ipalace.earthlyBranch,
+      isBodyPalace: ipalace.isBodyPalace,
+      isOriginalPalace: ipalace.isOriginalPalace,
+      majorStars: ipalace.majorStars.map((star: any) => ({
+        name: star.name,
+        brightness: star.brightness || '',
+        type: 'major' as const,
+      })),
+      minorStars: ipalace.minorStars.map((star: any) => ({
+        name: star.name,
+        brightness: star.brightness || '',
+        type: 'minor' as const,
+      })),
+      adjectiveStars: (ipalace.adjectiveStars || []).map((star: any) => ({
+        name: star.name,
+        brightness: star.brightness || '',
+        type: 'adjective' as const,
+      })),
+    }));
+
+    return {
+      id: `astrolabe_${Date.now()}`,
+      birthData,
+      palaces,
+      soul: iztroResult.soul,
+      body: iztroResult.body,
+      fiveElementsClass: iztroResult.fiveElementsClass,
+      createdAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('Error generating astrolabe:', error);
+    throw error;
+  }
+}
+
+export async function getYearTransit(astrolabe: Astrolabe, year: number): Promise<Astrolabe> {
+  // TODO: Implement iztro年运 calculations
+  return astrolabe;
+}
+
+export async function getMonthTransit(astrolabe: Astrolabe, year: number, month: number): Promise<Astrolabe> {
+  // TODO: Implement iztro月运 calculations
+  return astrolabe;
+}
+
+export async function getDayTransit(astrolabe: Astrolabe, year: number, month: number, day: number): Promise<Astrolabe> {
+  // TODO: Implement iztro日运 calculations
+  return astrolabe;
+}
