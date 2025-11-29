@@ -41,14 +41,22 @@ if (isSupabaseConfigured) {
 
 /**
  * 建立快取鍵（用於記憶體快取）
+ * 確保不同的 scope 有不同的快取鍵
  */
 function buildInterpretCacheKey(
   astrolabe: Astrolabe,
   fortune: FortuneData | null
 ): string {
-  const fortuneKey = fortune
-    ? `${fortune.scope}-${fortune.year || ''}-${fortune.month || ''}-${fortune.day || ''}`
-    : 'natal';
+  if (!fortune || fortune.scope === 'natal') {
+    return generateCacheKey('interpret', astrolabe.chartId, 'natal');
+  }
+
+  // 對於非本命運勢，包含完整的識別資訊
+  const decadeKey = fortune.decadeRange
+    ? `${fortune.decadeRange.start}-${fortune.decadeRange.end}`
+    : 'nodecade';
+
+  const fortuneKey = `${fortune.scope}-${decadeKey}-${fortune.year || 0}-${fortune.month || 0}-${fortune.day || 0}`;
 
   return generateCacheKey('interpret', astrolabe.chartId, fortuneKey);
 }
@@ -102,6 +110,13 @@ export async function POST(request: NextRequest) {
       astrolabe as Astrolabe,
       fortune as FortuneData | null
     );
+
+    // 詳細日誌記錄
+    console.log('=== Interpret API 請求 ===');
+    console.log('chartId:', chartId);
+    console.log('fortune scope:', fortune?.scope || 'null (natal)');
+    console.log('fortune data:', JSON.stringify(fortune, null, 2));
+    console.log('memoryCacheKey:', memoryCacheKey);
 
     let result: InterpretResult | null = null;
     let cacheSource: 'memory' | 'supabase' | 'llm' = 'llm';
