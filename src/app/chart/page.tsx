@@ -42,12 +42,13 @@ function ChartContent() {
     }
   }, [chartId, loadAstrolabe]);
 
-  // 命盤載入後自動載入解讀
+  // 命盤載入後自動載入解讀（只在首次載入時）
   useEffect(() => {
-    if (astrolabe && !interpretResult) {
+    if (astrolabe && !interpretResult && !interpreting) {
       loadInterpretation();
     }
-  }, [astrolabe, interpretResult, loadInterpretation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [astrolabe]); // 只依賴 astrolabe，避免 interpretResult 變化時重複觸發
 
   // 處理運勢變更
   const handleFortuneChange = async (

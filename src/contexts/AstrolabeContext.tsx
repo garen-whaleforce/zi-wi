@@ -250,8 +250,7 @@ export function AstrolabeProvider({ children }: { children: ReactNode }) {
     const fortuneToUse = fortuneOverride !== undefined ? fortuneOverride : state.fortune;
 
     dispatch({ type: 'SET_INTERPRETING', payload: true });
-    // 清除舊的解讀結果，避免顯示過期內容
-    dispatch({ type: 'SET_INTERPRET_RESULT', payload: null });
+    // 不清除舊結果，讓用戶在載入期間還能看到之前的內容
 
     try {
       console.log('載入解讀，fortune scope:', fortuneToUse?.scope || 'natal');
