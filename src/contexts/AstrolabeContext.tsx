@@ -230,9 +230,9 @@ export function AstrolabeProvider({ children }: { children: ReactNode }) {
           throw new Error('無法載入運勢');
         }
 
-        const data = await response.json();
-        dispatch({ type: 'SET_FORTUNE', payload: data.fortune });
-        return data.fortune as FortuneData;
+        const fortune = await response.json();
+        dispatch({ type: 'SET_FORTUNE', payload: fortune });
+        return fortune as FortuneData;
       } catch (error) {
         console.error('載入運勢失敗:', error);
         dispatch({ type: 'SET_FORTUNE', payload: null });
