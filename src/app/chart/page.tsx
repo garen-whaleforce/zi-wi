@@ -59,15 +59,11 @@ function ChartContent() {
       day: number;
     }
   ) => {
-    await loadFortune(scope, params);
+    // 載入運勢並取得新的 fortune 資料
+    const newFortune = await loadFortune(scope, params);
+    // 直接傳入新的 fortune 資料來載入解讀，避免 state 延遲問題
+    loadInterpretation(newFortune);
   };
-
-  // 運勢變更後重新載入解讀
-  useEffect(() => {
-    if (astrolabe && fortune !== undefined) {
-      loadInterpretation();
-    }
-  }, [fortune, astrolabe, loadInterpretation]);
 
   if (loading) {
     return (

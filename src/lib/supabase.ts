@@ -16,9 +16,99 @@ const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
 // 建立 Supabase 客戶端（僅在設定完成時）
 let supabase: SupabaseClient | null = null;
+let tablesInitialized = false;
 
 if (isSupabaseConfigured) {
   supabase = createClient(supabaseUrl!, supabaseAnonKey!);
+}
+
+// ============ 自動建表 ============
+
+/**
+ * 初始化資料表（自動建立）
+ * 使用 Supabase 的 RPC 功能執行 SQL
+ */
+export async function initializeTables(): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  if (!supabase) {
+    return { success: false, error: 'Supabase 未設定' };
+  }
+
+  if (tablesInitialized) {
+    return { success: true };
+  }
+
+  try {
+    // 嘗試查詢 charts 表來檢查是否存在
+    const { error: chartsCheckError } = await supabase
+      .from('charts')
+      .select('id')
+      .limit(1);
+
+    // 如果表不存在，錯誤訊息會包含 "relation" 或 "does not exist"
+    const chartsNeedCreate =
+      chartsCheckError?.message?.includes('does not exist') ||
+      chartsCheckError?.code === '42P01';
+
+    // 嘗試查詢 interpretations 表
+    const { error: interpCheckError } = await supabase
+      .from('interpretations')
+      .select('id')
+      .limit(1);
+
+    const interpNeedCreate =
+      interpCheckError?.message?.includes('does not exist') ||
+      interpCheckError?.code === '42P01';
+
+    if (chartsNeedCreate || interpNeedCreate) {
+      console.log('資料表不存在，請在 Supabase Dashboard 執行以下 SQL：');
+      console.log(`
+-- 命盤資料表
+CREATE TABLE IF NOT EXISTS charts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  name TEXT,
+  gender TEXT NOT NULL,
+  birth_date TEXT NOT NULL,
+  birth_time TEXT NOT NULL,
+  timezone TEXT NOT NULL,
+  chart_data JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 解讀結果快取表
+CREATE TABLE IF NOT EXISTS interpretations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  chart_id TEXT NOT NULL,
+  fortune_scope TEXT NOT NULL,
+  fortune_params JSONB NOT NULL,
+  result JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(chart_id, fortune_scope, fortune_params)
+);
+
+-- 建立索引
+CREATE INDEX IF NOT EXISTS idx_charts_user_id ON charts(user_id);
+CREATE INDEX IF NOT EXISTS idx_interpretations_chart_scope ON interpretations(chart_id, fortune_scope);
+      `);
+      // 表不存在但仍然繼續運行，只是快取功能會失效
+      console.warn('Supabase 快取功能暫時停用，等待資料表建立');
+      return { success: false, error: '資料表尚未建立' };
+    }
+
+    tablesInitialized = true;
+    console.log('Supabase 資料表檢查完成');
+    return { success: true };
+  } catch (error) {
+    console.error('初始化資料表錯誤:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '未知錯誤',
+    };
+  }
 }
 
 // ============ 資料庫型別 ============

@@ -21,11 +21,23 @@ import {
   getCachedInterpretation,
   saveInterpretation,
   isSupabaseConfigured,
+  initializeTables,
 } from '@/lib/supabase';
 import type { Astrolabe, FortuneData, InterpretResult } from '@/lib/types';
 
 // 啟動快取清理定時器
 startCacheCleanup();
+
+// 初始化 Supabase 資料表（啟動時檢查）
+if (isSupabaseConfigured) {
+  initializeTables().then((result) => {
+    if (result.success) {
+      console.log('Supabase 資料表已就緒');
+    } else {
+      console.warn('Supabase 初始化提示:', result.error);
+    }
+  });
+}
 
 /**
  * 建立快取鍵（用於記憶體快取）

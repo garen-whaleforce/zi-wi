@@ -152,8 +152,8 @@ interface AstrolabeContextType {
   loadFortune: (
     scope: AstrolabeState['fortuneScope'],
     params: AstrolabeState['fortuneParams']
-  ) => Promise<void>;
-  loadInterpretation: () => Promise<void>;
+  ) => Promise<FortuneData | null>;
+  loadInterpretation: (fortuneOverride?: FortuneData | null) => Promise<void>;
   selectPalace: (palaceName: string | undefined) => void;
   reset: () => void;
 }
@@ -202,17 +202,17 @@ export function AstrolabeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // 載入運勢
+  // 載入運勢（並返回新的 fortune 資料）
   const loadFortune = useCallback(
     async (
       scope: AstrolabeState['fortuneScope'],
       params: AstrolabeState['fortuneParams']
-    ) => {
+    ): Promise<FortuneData | null> => {
       dispatch({ type: 'SET_FORTUNE_SCOPE', payload: { scope, params } });
 
       if (scope === 'natal' || !state.astrolabe) {
         dispatch({ type: 'SET_FORTUNE', payload: null });
-        return;
+        return null;
       }
 
       try {
@@ -232,27 +232,36 @@ export function AstrolabeProvider({ children }: { children: ReactNode }) {
 
         const data = await response.json();
         dispatch({ type: 'SET_FORTUNE', payload: data.fortune });
+        return data.fortune as FortuneData;
       } catch (error) {
         console.error('載入運勢失敗:', error);
         dispatch({ type: 'SET_FORTUNE', payload: null });
+        return null;
       }
     },
     [state.astrolabe]
   );
 
-  // 載入解讀
-  const loadInterpretation = useCallback(async () => {
+  // 載入解讀（接受可選的 fortune 參數以確保使用最新值）
+  const loadInterpretation = useCallback(async (fortuneOverride?: FortuneData | null) => {
     if (!state.astrolabe) return;
 
+    // 使用傳入的 fortune 或 state 中的 fortune
+    const fortuneToUse = fortuneOverride !== undefined ? fortuneOverride : state.fortune;
+
     dispatch({ type: 'SET_INTERPRETING', payload: true });
+    // 清除舊的解讀結果，避免顯示過期內容
+    dispatch({ type: 'SET_INTERPRET_RESULT', payload: null });
 
     try {
+      console.log('載入解讀，fortune scope:', fortuneToUse?.scope || 'natal');
+
       const response = await fetch('/api/interpret', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           astrolabe: state.astrolabe,
-          fortune: state.fortune,
+          fortune: fortuneToUse,
           topics: ['all'],
         }),
       });
