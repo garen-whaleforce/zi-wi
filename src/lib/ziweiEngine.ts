@@ -1,5 +1,5 @@
 import { astro } from 'iztro';
-import { BirthData, Astrolabe, Palace, Star } from './types';
+import { BirthData, Astrolabe, Palace, Star, FortuneScope, FortuneData, PalaceName } from './types';
 
 // iztro FunctionalAstrolabe 型別（使用 any 避免版本相容問題）
 type FunctionalAstrolabe = ReturnType<typeof astro.bySolar>;
@@ -177,10 +177,10 @@ function toTraditional(text: string): string {
 }
 
 /**
- * 運限資料結構
+ * 運限資料結構（不包含本命 natal）
  */
 export interface HoroscopeData {
-  scope: 'decade' | 'year' | 'month' | 'day';
+  scope: Exclude<FortuneScope, 'natal'>;
   // 大限資訊
   decpiAge?: { start: number; end: number };
   decadePalace?: string;
@@ -510,4 +510,444 @@ export async function getMonthTransit(astrolabe: Astrolabe, year: number, month:
  */
 export async function getDayTransit(astrolabe: Astrolabe, year: number, month: number, day: number): Promise<HoroscopeData> {
   return getHoroscope(astrolabe, 'day', { year, month, day });
+}
+
+// ============ Palace Tags 系統 ============
+
+/**
+ * 宮位標籤（用於 LLM 解讀）
+ */
+export interface PalaceTag {
+  palace: PalaceName;
+  tags: string[];
+}
+
+/**
+ * 星曜分類常數
+ */
+const STAR_CATEGORIES = {
+  // 紫微星系（帝王星系）
+  ziwei: ['紫微', '天機', '太陽', '武曲', '天同', '廉貞'],
+  // 天府星系（財官星系）
+  tianfu: ['天府', '太陰', '貪狼', '巨門', '天相', '天梁', '七殺', '破軍'],
+  // 六吉星
+  lucky: ['左輔', '右弼', '文昌', '文曲', '天魁', '天鉞'],
+  // 六煞星
+  unlucky: ['擎羊', '陀羅', '火星', '鈴星', '地空', '地劫'],
+  // 祿馬星
+  wealth: ['祿存', '天馬'],
+  // 桃花星
+  romance: ['紅鸞', '天喜', '咸池', '天姚'],
+  // 孤寡星
+  lonely: ['孤辰', '寡宿'],
+} as const;
+
+/**
+ * 四化類型對應
+ */
+const SIHUA_PATTERNS: Record<string, string> = {
+  '化祿': '祿',
+  '化權': '權',
+  '化科': '科',
+  '化忌': '忌',
+};
+
+/**
+ * 判斷星曜是否帶有四化
+ */
+function getSihua(starName: string): string | null {
+  for (const [pattern, short] of Object.entries(SIHUA_PATTERNS)) {
+    if (starName.includes(pattern)) {
+      return short;
+    }
+  }
+  return null;
+}
+
+/**
+ * 取得星曜的基礎名稱（去除四化後綴）
+ */
+function getBaseStarName(starName: string): string {
+  return starName.replace(/化[祿權科忌]/g, '').trim();
+}
+
+/**
+ * 判斷是否為煞星
+ */
+function isUnluckyStar(starName: string): boolean {
+  const baseName = getBaseStarName(starName);
+  return STAR_CATEGORIES.unlucky.some(s => baseName.includes(s));
+}
+
+/**
+ * 判斷是否為吉星
+ */
+function isLuckyStar(starName: string): boolean {
+  const baseName = getBaseStarName(starName);
+  return STAR_CATEGORIES.lucky.some(s => baseName.includes(s)) ||
+         STAR_CATEGORIES.wealth.some(s => baseName.includes(s));
+}
+
+/**
+ * 建立宮位標籤
+ * @param astrolabe 命盤資料
+ * @param fortune 運勢資料（可選，用於運限星曜）
+ */
+export function buildPalaceTags(
+  astrolabe: Astrolabe,
+  fortune?: FortuneData | null
+): PalaceTag[] {
+  const palaceTags: PalaceTag[] = [];
+
+  for (const palace of astrolabe.palaces) {
+    const tags: string[] = [];
+    const palaceName = palace.name as PalaceName;
+
+    // 取得所有星曜
+    const allStars = [
+      ...palace.mainStars.map(s => s.name),
+      ...palace.minorStars.map(s => s.name),
+    ];
+
+    const mainStarNames = palace.mainStars.map(s => s.name);
+    const minorStarNames = palace.minorStars.map(s => s.name);
+
+    // === 規則 1: 主星組合格局 ===
+    const mainStarPatterns = analyzeMainStarPatterns(mainStarNames, palaceName);
+    tags.push(...mainStarPatterns);
+
+    // === 規則 2: 四化影響 ===
+    const sihuaTags = analyzeSihuaEffects(allStars, palaceName);
+    tags.push(...sihuaTags);
+
+    // === 規則 3: 煞星影響 ===
+    const unluckyTags = analyzeUnluckyStars(allStars, palaceName);
+    tags.push(...unluckyTags);
+
+    // === 規則 4: 吉星加持 ===
+    const luckyTags = analyzeLuckyStars(minorStarNames, palaceName);
+    tags.push(...luckyTags);
+
+    // === 規則 5: 特殊格局 ===
+    const specialPatterns = analyzeSpecialPatterns(allStars, palaceName);
+    tags.push(...specialPatterns);
+
+    // === 規則 6: 宮位強弱評估 ===
+    const strengthTag = evaluatePalaceStrength(allStars, palaceName);
+    if (strengthTag) tags.push(strengthTag);
+
+    palaceTags.push({
+      palace: palaceName,
+      tags: [...new Set(tags)], // 去重
+    });
+  }
+
+  return palaceTags;
+}
+
+/**
+ * 分析主星組合格局
+ */
+function analyzeMainStarPatterns(mainStars: string[], palace: PalaceName): string[] {
+  const tags: string[] = [];
+  const baseNames = mainStars.map(getBaseStarName);
+
+  // 紫微格局
+  if (baseNames.includes('紫微')) {
+    if (baseNames.includes('天府')) {
+      tags.push('紫府同宮格');
+    } else if (baseNames.includes('天相')) {
+      tags.push('紫相朝垣');
+    } else if (baseNames.includes('貪狼')) {
+      tags.push('紫貪格局');
+    } else if (baseNames.includes('七殺')) {
+      tags.push('紫殺格局');
+    } else if (baseNames.includes('破軍')) {
+      tags.push('紫破格局');
+    } else {
+      tags.push('紫微坐' + palace);
+    }
+  }
+
+  // 日月格局
+  if (baseNames.includes('太陽') && baseNames.includes('太陰')) {
+    tags.push('日月同宮');
+  } else if (baseNames.includes('太陽')) {
+    tags.push('太陽坐' + palace);
+  } else if (baseNames.includes('太陰')) {
+    tags.push('太陰坐' + palace);
+  }
+
+  // 財官格局（針對財帛、官祿宮）
+  if (palace === '財帛') {
+    if (baseNames.includes('武曲')) {
+      tags.push('武曲坐財');
+    }
+    if (baseNames.includes('天府')) {
+      tags.push('天府守財');
+    }
+    if (baseNames.includes('太陰')) {
+      tags.push('太陰守財');
+    }
+  }
+
+  if (palace === '官祿') {
+    if (baseNames.includes('紫微') || baseNames.includes('天府')) {
+      tags.push('官祿主星得力');
+    }
+    if (baseNames.includes('七殺')) {
+      tags.push('七殺守官祿');
+    }
+    if (baseNames.includes('武曲')) {
+      tags.push('武曲守官祿');
+    }
+  }
+
+  // 命宮特殊格局
+  if (palace === '命宮') {
+    if (baseNames.includes('廉貞') && baseNames.includes('貪狼')) {
+      tags.push('廉貪同宮');
+    }
+    if (baseNames.includes('天機') && baseNames.includes('太陰')) {
+      tags.push('機月同宮');
+    }
+    if (baseNames.includes('天同') && baseNames.includes('天梁')) {
+      tags.push('同梁格局');
+    }
+  }
+
+  // 無主星情況
+  if (mainStars.length === 0) {
+    tags.push('借星安命');
+  }
+
+  return tags;
+}
+
+/**
+ * 分析四化效應
+ */
+function analyzeSihuaEffects(allStars: string[], palace: PalaceName): string[] {
+  const tags: string[] = [];
+
+  const sihuaStars = allStars.filter(s => getSihua(s));
+
+  for (const star of sihuaStars) {
+    const sihua = getSihua(star);
+    const baseName = getBaseStarName(star);
+
+    if (sihua === '祿') {
+      if (palace === '財帛') {
+        tags.push('財帛化祿');
+      } else if (palace === '命宮') {
+        tags.push('命宮化祿');
+      } else if (palace === '官祿') {
+        tags.push('官祿化祿');
+      } else {
+        tags.push(`${baseName}化祿在${palace}`);
+      }
+    }
+
+    if (sihua === '權') {
+      if (palace === '官祿') {
+        tags.push('官祿化權');
+      } else if (palace === '命宮') {
+        tags.push('命宮化權');
+      } else {
+        tags.push(`${baseName}化權`);
+      }
+    }
+
+    if (sihua === '科') {
+      tags.push(`${baseName}化科`);
+    }
+
+    if (sihua === '忌') {
+      tags.push(`${baseName}化忌在${palace}`);
+      if (palace === '財帛') {
+        tags.push('財帛見化忌');
+      }
+      if (palace === '疾厄') {
+        tags.push('疾厄見化忌');
+      }
+      if (palace === '夫妻') {
+        tags.push('夫妻見化忌');
+      }
+    }
+  }
+
+  return tags;
+}
+
+/**
+ * 分析煞星影響
+ */
+function analyzeUnluckyStars(allStars: string[], palace: PalaceName): string[] {
+  const tags: string[] = [];
+
+  const unluckyInPalace = allStars.filter(isUnluckyStar);
+
+  if (unluckyInPalace.length >= 2) {
+    tags.push('煞星會聚');
+  }
+
+  // 火鈴同宮
+  const hasHuo = allStars.some(s => getBaseStarName(s).includes('火星'));
+  const hasLing = allStars.some(s => getBaseStarName(s).includes('鈴星'));
+  if (hasHuo && hasLing) {
+    tags.push('火鈴同宮');
+  } else if (hasHuo) {
+    tags.push('火星入' + palace);
+  } else if (hasLing) {
+    tags.push('鈴星入' + palace);
+  }
+
+  // 羊陀
+  const hasYang = allStars.some(s => getBaseStarName(s).includes('擎羊'));
+  const hasTuo = allStars.some(s => getBaseStarName(s).includes('陀羅'));
+  if (hasYang && hasTuo) {
+    tags.push('羊陀夾' + palace);
+  } else if (hasYang) {
+    tags.push('擎羊入' + palace);
+  } else if (hasTuo) {
+    tags.push('陀羅入' + palace);
+  }
+
+  // 地空地劫
+  const hasKong = allStars.some(s => getBaseStarName(s).includes('地空'));
+  const hasJie = allStars.some(s => getBaseStarName(s).includes('地劫'));
+  if (hasKong || hasJie) {
+    if (palace === '財帛') {
+      tags.push('財帛見空劫');
+    } else if (palace === '命宮') {
+      tags.push('命帶空劫');
+    } else {
+      tags.push('空劫入' + palace);
+    }
+  }
+
+  if (unluckyInPalace.length > 0 && palace === '命宮') {
+    tags.push('命宮帶煞');
+  }
+
+  return tags;
+}
+
+/**
+ * 分析吉星加持
+ */
+function analyzeLuckyStars(minorStars: string[], palace: PalaceName): string[] {
+  const tags: string[] = [];
+
+  // 左右輔弼
+  const hasZuo = minorStars.some(s => getBaseStarName(s).includes('左輔'));
+  const hasYou = minorStars.some(s => getBaseStarName(s).includes('右弼'));
+  if (hasZuo && hasYou) {
+    tags.push('左右夾輔');
+  } else if (hasZuo || hasYou) {
+    tags.push('單見輔弼');
+  }
+
+  // 昌曲
+  const hasChang = minorStars.some(s => getBaseStarName(s).includes('文昌'));
+  const hasQu = minorStars.some(s => getBaseStarName(s).includes('文曲'));
+  if (hasChang && hasQu) {
+    tags.push('昌曲同宮');
+  } else if (hasChang || hasQu) {
+    tags.push('文星入' + palace);
+  }
+
+  // 魁鉞
+  const hasKui = minorStars.some(s => getBaseStarName(s).includes('天魁'));
+  const hasYue = minorStars.some(s => getBaseStarName(s).includes('天鉞'));
+  if (hasKui || hasYue) {
+    tags.push('魁鉞貴人');
+  }
+
+  // 祿馬
+  const hasLu = minorStars.some(s => getBaseStarName(s).includes('祿存'));
+  const hasMa = minorStars.some(s => getBaseStarName(s).includes('天馬'));
+  if (hasLu && hasMa) {
+    tags.push('祿馬交馳');
+  } else if (hasLu) {
+    tags.push('祿存守' + palace);
+  } else if (hasMa) {
+    tags.push('天馬入' + palace);
+  }
+
+  // 統計吉星數量
+  const luckyCount = minorStars.filter(isLuckyStar).length;
+  if (luckyCount >= 3) {
+    tags.push('吉星雲集');
+  }
+
+  return tags;
+}
+
+/**
+ * 分析特殊格局
+ */
+function analyzeSpecialPatterns(allStars: string[], palace: PalaceName): string[] {
+  const tags: string[] = [];
+  const baseNames = allStars.map(getBaseStarName);
+
+  // 桃花格局
+  const romanceStars = STAR_CATEGORIES.romance.filter(s =>
+    baseNames.some(name => name.includes(s))
+  );
+  if (romanceStars.length >= 2) {
+    tags.push('桃花旺盛');
+  } else if (romanceStars.length === 1) {
+    if (palace === '命宮' || palace === '夫妻') {
+      tags.push('帶桃花');
+    }
+  }
+
+  // 孤寡格局
+  const hasGuChen = baseNames.some(s => s.includes('孤辰'));
+  const hasGuaSu = baseNames.some(s => s.includes('寡宿'));
+  if (hasGuChen && hasGuaSu) {
+    tags.push('孤寡同宮');
+  } else if (hasGuChen || hasGuaSu) {
+    if (palace === '命宮' || palace === '夫妻') {
+      tags.push('帶孤寡');
+    }
+  }
+
+  // 華蓋（藝術、宗教傾向）
+  const hasHuaGai = baseNames.some(s => s.includes('華蓋'));
+  if (hasHuaGai && palace === '命宮') {
+    tags.push('命帶華蓋');
+  }
+
+  return tags;
+}
+
+/**
+ * 評估宮位強弱
+ */
+function evaluatePalaceStrength(allStars: string[], palace: PalaceName): string | null {
+  let score = 0;
+
+  for (const star of allStars) {
+    const sihua = getSihua(star);
+
+    // 四化加減分
+    if (sihua === '祿') score += 2;
+    if (sihua === '權') score += 1.5;
+    if (sihua === '科') score += 1;
+    if (sihua === '忌') score -= 2;
+
+    // 吉凶星加減分
+    if (isLuckyStar(star)) score += 1;
+    if (isUnluckyStar(star)) score -= 1;
+  }
+
+  // 根據分數返回評語
+  if (score >= 4) return `${palace}極強`;
+  if (score >= 2) return `${palace}強`;
+  if (score <= -3) return `${palace}弱`;
+  if (score <= -1) return `${palace}略波動`;
+
+  return null;
 }

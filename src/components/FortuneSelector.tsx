@@ -7,13 +7,11 @@
 'use client';
 
 import { useState, useMemo, useCallback, memo } from 'react';
+import type { FortuneScope } from '@/lib/types';
 
 interface FortuneSelectorProps {
   birthYear?: number; // 出生年份，用於計算大限
-  onScopeChange?: (
-    scope: 'natal' | 'decade' | 'year' | 'month' | 'day',
-    params: FortuneParams
-  ) => void;
+  onScopeChange?: (scope: FortuneScope, params: FortuneParams) => void;
 }
 
 export interface FortuneParams {
@@ -52,7 +50,7 @@ const SCOPE_ICONS = {
   day: '☀️',
 } as const;
 
-type ScopeType = keyof typeof SCOPE_LABELS;
+type ScopeType = FortuneScope;
 
 /**
  * 大限按鈕元件（Memoized）

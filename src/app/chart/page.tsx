@@ -9,8 +9,9 @@ import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import TraditionalChart from '@/components/TraditionalChart';
 import SidebarTabs from '@/components/SidebarTabs';
-import FortuneSelector from '@/components/FortuneSelector';
+import FortuneMatrix from '@/components/FortuneMatrix';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import type { FortuneScope } from '@/lib/types';
 import {
   useAstrolabe,
   useAstrolabeData,
@@ -27,7 +28,7 @@ function ChartContent() {
   // 使用 Context hooks
   const { loadAstrolabe, loadInterpretation } = useAstrolabe();
   const { astrolabe, loading, error } = useAstrolabeData();
-  const { fortune, loadFortune } = useFortuneData();
+  const { fortune, scope: fortuneScope, params: fortuneParams, loadFortune } = useFortuneData();
   const { interpretResult, interpreting } = useInterpretData();
   const { selectedPalace, selectPalace } = useSelectedPalace();
 
@@ -50,19 +51,24 @@ function ChartContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [astrolabe]); // 只依賴 astrolabe，避免 interpretResult 變化時重複觸發
 
-  // 處理運勢變更
-  const handleFortuneChange = async (
-    scope: 'natal' | 'decade' | 'year' | 'month' | 'day',
+  // 處理 FortuneMatrix 選擇
+  const handleMatrixSelect = async (
+    scope: FortuneScope,
     params: {
       decadeRange?: { start: number; end: number };
-      year: number;
-      month: number;
-      day: number;
+      year?: number;
+      month?: number;
+      day?: number;
     }
   ) => {
-    // 載入運勢並取得新的 fortune 資料
-    const newFortune = await loadFortune(scope, params);
-    // 直接傳入新的 fortune 資料來載入解讀，避免 state 延遲問題
+    const today = new Date();
+    const fullParams = {
+      decadeRange: params.decadeRange,
+      year: params.year || today.getFullYear(),
+      month: params.month || today.getMonth() + 1,
+      day: params.day || today.getDate(),
+    };
+    const newFortune = await loadFortune(scope, fullParams);
     loadInterpretation(newFortune);
   };
 
@@ -140,10 +146,22 @@ function ChartContent() {
           </p>
         </div>
 
-        {/* 運勢選擇器 */}
-        <div className="mb-8">
-          <FortuneSelector birthYear={birthYear} onScopeChange={handleFortuneChange} />
-        </div>
+        {/* 運勢時間軸矩陣 - 放在顯眼位置 */}
+        {birthYear && (
+          <div className={`mb-6 transition-all duration-500 delay-100 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
+            <FortuneMatrix
+              birthYear={birthYear}
+              selected={{
+                scope: fortuneScope,
+                decadeRange: fortuneParams.decadeRange,
+                year: fortuneParams.year,
+                month: fortuneParams.month,
+                day: fortuneParams.day,
+              }}
+              onSelect={handleMatrixSelect}
+            />
+          </div>
+        )}
 
         {/* 主要內容區 */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-8">
@@ -165,6 +183,7 @@ function ChartContent() {
             />
           </div>
         </div>
+
 
         {/* 工具列 */}
         <div className={`mt-8 flex justify-center gap-4 transition-all duration-500 delay-300 ${mounted ? 'opacity-100' : 'opacity-0'}`}>

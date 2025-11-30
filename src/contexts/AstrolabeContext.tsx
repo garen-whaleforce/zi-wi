@@ -13,7 +13,7 @@ import {
   useEffect,
   type ReactNode,
 } from 'react';
-import type { Astrolabe, FortuneData, InterpretResult } from '@/lib/types';
+import type { Astrolabe, FortuneData, InterpretResult, FortuneScope } from '@/lib/types';
 import { getChart, saveChart } from '@/lib/chartStorage';
 
 // ============ State Types ============
@@ -25,7 +25,7 @@ interface AstrolabeState {
 
   // 運勢資料
   fortune: FortuneData | null;
-  fortuneScope: 'natal' | 'decade' | 'year' | 'month' | 'day';
+  fortuneScope: FortuneScope;
   fortuneParams: {
     decadeRange?: { start: number; end: number };
     year: number;

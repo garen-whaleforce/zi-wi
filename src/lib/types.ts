@@ -2,6 +2,67 @@
  * 紫微斗數命盤相關類型定義
  */
 
+// ============ 共用型別 ============
+
+/**
+ * 運勢範圍類型
+ */
+export type FortuneScope = 'natal' | 'decade' | 'year' | 'month' | 'day';
+
+/**
+ * 十二宮位名稱
+ */
+export type PalaceName =
+  | '命宮' | '兄弟' | '夫妻' | '子女'
+  | '財帛' | '疾厄' | '遷移' | '交友'
+  | '官祿' | '田宅' | '福德' | '父母';
+
+/**
+ * 宮位英文 key 對應（用於 InterpretResult）
+ */
+export type PalaceKey =
+  | 'life' | 'siblings' | 'marriage' | 'children'
+  | 'wealth' | 'health' | 'travel' | 'friends'
+  | 'career' | 'property' | 'fortune' | 'parents';
+
+/**
+ * 宮位名稱與英文 key 的對應表
+ */
+export const PALACE_NAME_TO_KEY: Record<PalaceName, PalaceKey> = {
+  '命宮': 'life',
+  '兄弟': 'siblings',
+  '夫妻': 'marriage',
+  '子女': 'children',
+  '財帛': 'wealth',
+  '疾厄': 'health',
+  '遷移': 'travel',
+  '交友': 'friends',
+  '官祿': 'career',
+  '田宅': 'property',
+  '福德': 'fortune',
+  '父母': 'parents',
+};
+
+/**
+ * 英文 key 與宮位名稱的對應表
+ */
+export const PALACE_KEY_TO_NAME: Record<PalaceKey, PalaceName> = {
+  life: '命宮',
+  siblings: '兄弟',
+  marriage: '夫妻',
+  children: '子女',
+  wealth: '財帛',
+  health: '疾厄',
+  travel: '遷移',
+  friends: '交友',
+  career: '官祿',
+  property: '田宅',
+  fortune: '福德',
+  parents: '父母',
+};
+
+// ============ 資料型別 ============
+
 export interface BirthData {
   name: string | null;
   gender: '男' | '女' | 'M' | 'F';
@@ -38,7 +99,7 @@ export interface Astrolabe {
 }
 
 export interface FortuneData {
-  scope: 'natal' | 'decade' | 'year' | 'month' | 'day';
+  scope: FortuneScope;
   decadeRange?: { start: number; end: number }; // 大限年齡區間
   year?: number;
   month?: number;

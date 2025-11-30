@@ -4,6 +4,7 @@
  */
 
 import type { Astrolabe, FortuneData, InterpretResult } from './types';
+import { buildPalaceTags, type PalaceTag } from './ziweiEngine';
 import {
   withRetry,
   fetchWithTimeout,
@@ -12,19 +13,27 @@ import {
   APIError,
 } from './retry';
 
-// 系統角色設定
+// 系統角色設定（更嚴格的限制）
 const SYSTEM_PROMPT = `你是一位以紫微斗數為基礎的命盤分析助手。
 
-## 重要規則
-1. 你僅提供娛樂與自我反思參考，不提供醫療、投資、法律等專業建議。
-2. 命盤資料以 JSON 方式提供給你，不要自行編造星曜位置。
-3. 不要推翻命盤數據，不要自行猜測星曜在何宮，只能根據提供的資訊解釋。
-4. 遇到健康、財務等議題，只能給出生活習慣與態度建議，並提醒尋求專業人士協助。
-5. 語氣溫和專業，避免過於絕對的斷言，多使用「傾向於」、「可能」、「適合考慮」等詞彙。
-6. 請用繁體中文回答。
+## 核心原則（必須嚴格遵守）
+1. **只能根據 palaceTags 延伸說明**：你收到的 JSON 中包含預先計算好的 palaceTags，這是唯一的事實來源。
+2. **禁止新增**：不得提及 palaceTags 沒有的星曜、宮位組合、年份或具體事件。
+3. **禁止具體化**：
+   - 不得出現具體日期（如「3月15日」）
+   - 不得出現具體金額（如「收入增加50%」）
+   - 不得出現具體疾病名稱（如「高血壓」「糖尿病」）
+4. **健康與財務警語**：
+   - 健康相關內容必須加上：「如有不適請尋求專業醫療建議」
+   - 財務相關內容必須加上：「投資理財請諮詢專業人士」
+
+## 語氣風格
+- 溫和專業，使用「傾向於」「可能」「適合考慮」等詞彙
+- 正面鼓勵為主，挑戰建設性表達
+- 繁體中文回應
 
 ## 輸出格式
-請以 JSON 格式回覆，不要包含任何其他文字。`;
+必須回傳符合指定結構的 JSON，不要包含任何其他文字或 markdown 標記。`;
 
 /**
  * LLM 配置
@@ -60,6 +69,7 @@ function getLLMConfig(): LLMConfig {
 
 /**
  * 呼叫 OpenAI API（底層函數）
+ * 支援 JSON mode（如果模型支援）
  */
 async function callOpenAIAPI(
   messages: { role: string; content: string }[],
@@ -67,6 +77,24 @@ async function callOpenAIAPI(
   model?: string
 ): Promise<string> {
   const useModel = model || config.model;
+
+  // 檢查是否支援 JSON mode（gpt-4o 系列和 gpt-3.5-turbo-1106+）
+  const supportsJsonMode =
+    useModel.includes('gpt-4') ||
+    useModel.includes('gpt-3.5-turbo-1106') ||
+    useModel.includes('gpt-3.5-turbo-0125');
+
+  const requestBody: Record<string, any> = {
+    model: useModel,
+    messages,
+    max_tokens: config.maxTokens,
+    temperature: config.temperature,
+  };
+
+  // 如果支援 JSON mode，啟用它
+  if (supportsJsonMode) {
+    requestBody.response_format = { type: 'json_object' };
+  }
 
   const response = await fetchWithTimeout(
     'https://api.openai.com/v1/chat/completions',
@@ -76,12 +104,7 @@ async function callOpenAIAPI(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify({
-        model: useModel,
-        messages,
-        max_tokens: config.maxTokens,
-        temperature: config.temperature,
-      }),
+      body: JSON.stringify(requestBody),
     },
     config.timeoutMs
   );
@@ -326,16 +349,8 @@ export async function callLLM(
     return getDefaultResult('API 金鑰未設定，請聯繫管理員');
   }
 
-  // 建立命盤 JSON 資料
-  const chartData = buildChartData(astrolabe, fortune);
-
-  // 取得今天日期
-  const today = new Date().toLocaleDateString('zh-TW', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  });
+  // 建立新的結構化輸入（包含 palaceTags）
+  const llmInput = buildLLMInput(astrolabe, fortune);
 
   // 取得運勢範圍描述
   const scopeInfo = getScopeDescription(fortune);
@@ -345,27 +360,32 @@ export async function callLLM(
   const periodPrefix = isNatal ? '' : `在${scopeInfo.scopeName}期間，`;
   const todaySection = isNatal || fortune?.scope === 'day'
     ? `
-- **今日適合做的事**（todayTodo）：根據命盤與今日運勢，列出 3-5 件今天適合做的具體事項
-- **今日不適合的事**（todayAvoid）：根據命盤與今日運勢，列出 3-5 件今天應避免的事項`
+- **今日適合做的事**（todayTodo）：根據 palaceTags 中的標籤，列出 3-5 件今天適合做的具體事項
+- **今日不適合的事**（todayAvoid）：根據 palaceTags 中的標籤，列出 3-5 件今天應避免的事項`
     : `
-- **本期適合做的事**（todayTodo）：根據${scopeInfo.scopeName}的運勢，列出 3-5 件這段期間適合做的事項
-- **本期應避免的事**（todayAvoid）：根據${scopeInfo.scopeName}的運勢，列出 3-5 件這段期間應避免的事項`;
+- **本期適合做的事**（todayTodo）：根據 palaceTags 中的標籤，列出 3-5 件這段期間適合做的事項
+- **本期應避免的事**（todayAvoid）：根據 palaceTags 中的標籤，列出 3-5 件這段期間應避免的事項`;
 
-  const prompt = `請根據以下命盤 JSON 資料，為命主提供「${scopeInfo.scopeName}」的詳細命理解讀。
+  const prompt = `## 任務
+請根據以下命盤資料，為命主提供「${scopeInfo.scopeName}」的命理解讀。
 
-## 解讀範圍說明
+## 輸入資料
+\`\`\`json
+${JSON.stringify(llmInput, null, 2)}
+\`\`\`
+
+## 重要：palaceTags 是唯一事實來源
+上方 JSON 中的 \`palaceTags\` 陣列包含每個宮位的關鍵標籤，你的解讀**必須且只能**根據這些標籤延伸說明。
+
+例如：
+- 若 palaceTags 中有「紫府同宮格」，你可以說明此格局的特質
+- 若沒有某個星曜的標籤，**絕對不能**提及該星曜
+
+## 解讀範圍
 **當前查詢：${scopeInfo.scopeName}**
 ${scopeInfo.scopeContext}
 
 ${scopeInfo.interpretationFocus}
-
-## 命盤資料
-\`\`\`json
-${JSON.stringify(chartData, null, 2)}
-\`\`\`
-
-## 今天日期
-${today}
 
 ## 解讀任務
 請針對十二宮提供「${scopeInfo.scopeName}」的解讀（每項 80-120 字）：
@@ -374,8 +394,8 @@ ${today}
 2. **兄弟宮解讀**（siblings）：${periodPrefix}兄弟姐妹關係、平輩互動
 3. **夫妻宮解讀**（marriage）：${periodPrefix}感情婚姻、伴侶關係
 4. **子女宮解讀**（children）：${periodPrefix}子女緣份、與晚輩的互動
-5. **財帛宮解讀**（wealth）：${periodPrefix}財運走向、收入變化
-6. **疾厄宮解讀**（health）：${periodPrefix}健康狀況、需注意事項
+5. **財帛宮解讀**（wealth）：${periodPrefix}財運走向、收入變化（請加註：投資理財請諮詢專業人士）
+6. **疾厄宮解讀**（health）：${periodPrefix}健康狀況、需注意事項（請加註：如有不適請尋求專業醫療建議）
 7. **遷移宮解讀**（travel）：${periodPrefix}外出運勢、發展機會
 8. **交友宮解讀**（friends）：${periodPrefix}人際關係、貴人運
 9. **官祿宮解讀**（career）：${periodPrefix}職業發展、工作運勢
@@ -387,17 +407,18 @@ ${today}
 - **總結建議**（summary）：「${scopeInfo.scopeName}」的整體運勢概述與建議（100-150字）${todaySection}
 
 ## 重要提醒
+- 只能根據 palaceTags 中的標籤延伸說明，禁止提及標籤沒有的星曜
 - 請確保解讀內容是針對「${scopeInfo.scopeName}」，而非其他時期
 - ${isNatal ? '本命解讀應著重先天格局和一生傾向' : '運勢解讀應著重這段期間的變化和特點，與本命有所區別'}
 
-## 輸出 JSON 格式
+## 回傳 JSON 格式（直接回傳，不要 markdown 標記）
 {
   "life": "命宮解讀內容",
   "siblings": "兄弟宮解讀內容",
   "marriage": "夫妻宮解讀內容",
   "children": "子女宮解讀內容",
-  "wealth": "財帛宮解讀內容（請加註：投資理財請諮詢專業人士）",
-  "health": "疾厄宮解讀內容（請加註：健康問題請就醫諮詢）",
+  "wealth": "財帛宮解讀內容",
+  "health": "疾厄宮解讀內容",
   "travel": "遷移宮解讀內容",
   "friends": "交友宮解讀內容",
   "career": "官祿宮解讀內容",
@@ -512,6 +533,70 @@ function getScopeLabel(scope: string): string {
     day: '流日（日運）',
   };
   return labels[scope] || '本命';
+}
+
+/**
+ * 格式化運勢期間描述
+ */
+function formatFortunePeriod(fortune: FortuneData): string {
+  switch (fortune.scope) {
+    case 'decade':
+      return fortune.decadeRange
+        ? `${fortune.decadeRange.start}-${fortune.decadeRange.end}歲大限`
+        : '大限';
+    case 'year':
+      return `${fortune.year}年`;
+    case 'month':
+      return `${fortune.year}年${fortune.month}月`;
+    case 'day':
+      return `${fortune.year}年${fortune.month}月${fortune.day}日`;
+    default:
+      return '本命';
+  }
+}
+
+/**
+ * 建立新的 LLM 輸入結構（包含 palaceTags）
+ */
+function buildLLMInput(
+  astrolabe: Astrolabe,
+  fortune: FortuneData | null
+): {
+  meta: Record<string, any>;
+  palaces: Record<string, any>;
+  palaceTags: PalaceTag[];
+  fortuneSummary: Record<string, any> | null;
+} {
+  // 基本資訊
+  const meta = {
+    gender: astrolabe.gender,
+    birthDate: astrolabe.birthDate,
+    birthTime: astrolabe.birthTime,
+  };
+
+  // 十二宮簡化資料
+  const palaces: Record<string, any> = {};
+  for (const palace of astrolabe.palaces) {
+    palaces[palace.name] = {
+      stem: palace.stem,
+      branch: palace.branch,
+      mainStars: palace.mainStars.map(s => s.name),
+      minorStars: palace.minorStars.slice(0, 6).map(s => s.name), // 限制數量減少 token
+    };
+  }
+
+  // 計算宮位標籤
+  const palaceTags = buildPalaceTags(astrolabe, fortune);
+
+  // 運勢簡表
+  const fortuneSummary = fortune ? {
+    scope: fortune.scope,
+    scopeLabel: getScopeLabel(fortune.scope),
+    period: formatFortunePeriod(fortune),
+    score: fortune.overallScore,
+  } : null;
+
+  return { meta, palaces, palaceTags, fortuneSummary };
 }
 
 /**
