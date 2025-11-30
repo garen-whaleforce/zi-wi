@@ -115,6 +115,14 @@ export interface FortuneData {
   keyPeriods: string[];
 }
 
+/**
+ * 宮位標籤（用於顯示分析依據）
+ */
+export interface PalaceTag {
+  palace: PalaceName;
+  tags: string[];
+}
+
 export interface InterpretResult {
   // 十二宮解讀
   life: string;        // 命宮
@@ -134,6 +142,8 @@ export interface InterpretResult {
   todayAdvice?: string[]; // 今日建議（3條）
   todayTodo?: string[];   // 今日適合做的事（3-5條）
   todayAvoid?: string[];  // 今日不適合的事（3-5條）
+  // 宮位分析標籤（程式邏輯產生的事實依據）
+  palaceTags?: PalaceTag[];
 }
 
 // 已保存的命盤資料

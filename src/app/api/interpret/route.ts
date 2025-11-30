@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { callLLM } from '@/lib/llm';
+import { buildPalaceTags } from '@/lib/ziweiEngine';
 import {
   checkRateLimit,
   getClientIP,
@@ -156,8 +157,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // 計算並附加 palaceTags（供前端顯示分析依據）
+    const palaceTags = buildPalaceTags(astrolabe as Astrolabe, fortuneData);
+    const resultWithTags: InterpretResult = {
+      ...result,
+      palaceTags,
+    };
+
     // 在回應中加入速率限制和快取資訊
-    const response = NextResponse.json(result);
+    const response = NextResponse.json(resultWithTags);
     response.headers.set(
       'X-RateLimit-Remaining',
       String(rateLimitResult.remaining)

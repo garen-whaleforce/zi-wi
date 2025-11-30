@@ -6,7 +6,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
-import type { InterpretResult } from '@/lib/types';
+import type { InterpretResult, PalaceTag, PalaceName } from '@/lib/types';
 
 interface SidebarTabsProps {
   palaceName?: string;
@@ -62,6 +62,22 @@ const TAB_MAP: { [key: string]: TabKey } = {
   田宅: 'property',
   福德: 'fortune',
   父母: 'parents',
+};
+
+// Tab key 到宮位名稱的對照表（用於取得標籤）
+const TAB_TO_PALACE: { [key in TabKey]?: PalaceName } = {
+  life: '命宮',
+  siblings: '兄弟',
+  marriage: '夫妻',
+  children: '子女',
+  wealth: '財帛',
+  health: '疾厄',
+  travel: '遷移',
+  friends: '交友',
+  career: '官祿',
+  property: '田宅',
+  fortune: '福德',
+  parents: '父母',
 };
 
 /**
@@ -227,6 +243,90 @@ const Disclaimer = memo(function Disclaimer() {
   );
 });
 
+/**
+ * 標籤分類與顏色配置
+ */
+const TAG_CATEGORIES = {
+  // 格局類（紫色）
+  pattern: {
+    keywords: ['格', '同宮', '朝垣', '坐'],
+    color: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  },
+  // 四化類（金色）
+  sihua: {
+    keywords: ['化祿', '化權', '化科', '化忌'],
+    color: 'bg-gold-500/20 text-gold-300 border-gold-500/30',
+  },
+  // 吉星類（綠色）
+  lucky: {
+    keywords: ['輔弼', '昌曲', '魁鉞', '祿馬', '貴人', '吉星', '天馬', '祿存'],
+    color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  },
+  // 煞星類（紅色）
+  unlucky: {
+    keywords: ['煞', '火星', '鈴星', '擎羊', '陀羅', '空劫', '地空', '地劫'],
+    color: 'bg-red-500/20 text-red-300 border-red-500/30',
+  },
+  // 桃花類（粉色）
+  romance: {
+    keywords: ['桃花', '紅鸞', '天喜'],
+    color: 'bg-pink-500/20 text-pink-300 border-pink-500/30',
+  },
+  // 強弱評估（藍色）
+  strength: {
+    keywords: ['極強', '強', '弱', '波動'],
+    color: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  },
+};
+
+/**
+ * 根據標籤內容取得對應顏色
+ */
+function getTagColor(tag: string): string {
+  for (const category of Object.values(TAG_CATEGORIES)) {
+    if (category.keywords.some(kw => tag.includes(kw))) {
+      return category.color;
+    }
+  }
+  // 預設樣式
+  return 'bg-white/10 text-white/70 border-white/20';
+}
+
+/**
+ * 宮位標籤顯示元件
+ */
+const PalaceTagsDisplay = memo(function PalaceTagsDisplay({
+  tags,
+  palaceName,
+}: {
+  tags: string[];
+  palaceName: string;
+}) {
+  if (!tags || tags.length === 0) return null;
+
+  return (
+    <div className="mb-4 p-3 rounded-lg bg-dark-800/50 border border-white/10">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs text-white/50">分析依據</span>
+        <span className="text-[10px] text-white/30">（{palaceName}）</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {tags.map((tag, index) => (
+          <span
+            key={index}
+            className={`
+              inline-block px-2 py-0.5 text-xs rounded-full border
+              ${getTagColor(tag)}
+            `}
+          >
+            {tag}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+});
+
 function SidebarTabsComponent({
   palaceName,
   loading = false,
@@ -263,6 +363,18 @@ function SidebarTabsComponent({
     };
   }, [interpretResult]);
 
+  // 取得當前宮位的標籤
+  const currentPalaceTags = useMemo(() => {
+    if (!interpretResult?.palaceTags || activeTab === 'overview' || activeTab === 'today') {
+      return null;
+    }
+    const palaceName = TAB_TO_PALACE[activeTab];
+    if (!palaceName) return null;
+
+    const palaceTag = interpretResult.palaceTags.find(pt => pt.palace === palaceName);
+    return palaceTag ? { tags: palaceTag.tags, name: palaceName } : null;
+  }, [interpretResult?.palaceTags, activeTab]);
+
   const content = useMemo(() => {
     if (loading) {
       return <LoadingContent />;
@@ -288,16 +400,25 @@ function SidebarTabsComponent({
 
     if (contentMap) {
       return (
-        <GeneralContent
-          content={contentMap[activeTab as keyof typeof contentMap]}
-          todayAdvice={interpretResult.todayAdvice}
-          showAdvice={activeTab === 'overview'}
-        />
+        <>
+          {/* 顯示宮位標籤 */}
+          {currentPalaceTags && (
+            <PalaceTagsDisplay
+              tags={currentPalaceTags.tags}
+              palaceName={currentPalaceTags.name}
+            />
+          )}
+          <GeneralContent
+            content={contentMap[activeTab as keyof typeof contentMap]}
+            todayAdvice={interpretResult.todayAdvice}
+            showAdvice={activeTab === 'overview'}
+          />
+        </>
       );
     }
 
     return null;
-  }, [loading, interpretResult, activeTab, contentMap]);
+  }, [loading, interpretResult, activeTab, contentMap, currentPalaceTags]);
 
   return (
     <div className="glass-card flex flex-col">
